@@ -21,6 +21,8 @@
 #
 
 express = require 'express'
+request = require 'request'
+querystring = require 'querystring'
 MemoryStore = require('express').session.MemoryStore
 
 Rdio = require './lib/rdio'
@@ -45,6 +47,11 @@ RdioException = (msg) ->
   Error.call this, msg
   Error.captureStackTrace this, arguments.callee
 
+EchoNestException = (msg) ->
+  @name = "EchoNestException"
+  Error.call this, msg
+  Error.captureStackTrace this, arguments.callee
+
 
 app.get '/', (req, res) ->
   accessToken = req.session.accessToken
@@ -53,18 +60,42 @@ app.get '/', (req, res) ->
     res.send '<a href="/login">Login to rdio to continue.</a>'
     return
 
-  rdio = new Rdio [cred.RDIO_CONSUMER_KEY, cred.RDIO_CONSUMER_SECRET],
-                  [accessToken, accessTokenSecret]
-  params =
-    name: "Awesome Test Playlist 1"
-    description: "abc"
-    tracks: "t1153387, t1153411"
+  # Get playlist from echonest
+  # http://developer.echonest.com/api/v4/playlist/static?api_key=N6E4NIOVYMTHNDM8J&style=80s&style=powerpop&min_tempo=150&max_tempo=180&type=artist-description&results=5&bucket=id:rdio-us-streaming&limit=true
+  ECHONEST_API_HOST = 'http://developer.echonest.com/api/v4'
 
-  rdio.call 'createPlaylist', params, (err, data) ->
-    throw new RdioException err if err?
+  queryParams =
+    api_key: cred.ECHONEST_API_KEY
+    style: "80s"
+    min_tempo: 150
+    max_tempo: 180
+    type: "artist-description"
+    results: 25
+    bucket: "id:rdio-us-streaming"
+    limit: true
 
-    playlist = data.result
-    res.send "Created playlist #{playlist.name}!"
+  uri = "#{ECHONEST_API_HOST}/playlist/static?" + querystring.stringify(queryParams)
+  console.log uri
+  request uri, (err, res, body) ->
+    #throw new EchoNestException err if err?
+    json = JSON.parse body
+    console.log(json.response.songs)
+
+    playlistSongs = (s.foreign_ids[0].foreign_id.split(':')[2] for s in json.response.songs)
+    console.log playlistSongs
+
+    rdio = new Rdio [cred.RDIO_CONSUMER_KEY, cred.RDIO_CONSUMER_SECRET],
+                    [accessToken, accessTokenSecret]
+    params =
+      name: "80s High Tempo Mix"
+      description: "A runnr generated playlist"
+      tracks: playlistSongs.join ', '
+
+    rdio.call 'createPlaylist', params, (err, data) ->
+      throw new RdioException err if err?
+
+      playlist = data.result
+      res.send "Created playlist #{playlist.name}!"
 
 app.get '/login', (req, res) ->
   callbackURL = 'http://localhost:8000/callback'
