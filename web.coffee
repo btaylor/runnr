@@ -49,21 +49,22 @@ RdioException = (msg) ->
 app.get '/', (req, res) ->
   accessToken = req.session.accessToken
   accessTokenSecret = req.session.accessTokenSecret
-  res.send "accessToken = #{accessToken}, accessTokenSecret = #{accessTokenSecret}"
+  if not accessToken? or not accessTokenSecret?
+    res.send '<a href="/login">Login to rdio to continue.</a>'
+    return
 
-  if accessToken? and accessTokenSecret?
-    rdio = new Rdio [cred.RDIO_CONSUMER_KEY, cred.RDIO_CONSUMER_SECRET],
-                    [accessToken, accessTokenSecret]
-    rdio.call 'currentUser', (err, data) ->
-      throw new RdioException err if err?
+  rdio = new Rdio [cred.RDIO_CONSUMER_KEY, cred.RDIO_CONSUMER_SECRET],
+                  [accessToken, accessTokenSecret]
+  params =
+    name: "Awesome Test Playlist 1"
+    description: "abc"
+    tracks: "t1153387, t1153411"
 
-      currentUser = data.result
+  rdio.call 'createPlaylist', params, (err, data) ->
+    throw new RdioException err if err?
 
-      rdio.call 'getPlaylists', (err, data) ->
-        throw new RdioException err if err?
-
-        playlists = data.result.owned
-        console.log playlists
+    playlist = data.result
+    res.send "Created playlist #{playlist.name}!"
 
 app.get '/login', (req, res) ->
   callbackURL = 'http://localhost:8000/callback'
