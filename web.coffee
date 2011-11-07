@@ -21,12 +21,11 @@
 #
 
 express = require 'express'
-request = require 'request'
-querystring = require 'querystring'
 MemoryStore = require('express').session.MemoryStore
 
 cred = require './credentials'
 RdioClient = require './rdioClient'
+EchoNestClient = require './echoNestClient'
 
 app = express.createServer()
 app.configure 'development', () ->
@@ -41,12 +40,8 @@ app.configure 'development', () ->
     store: new MemoryStore
       reapInterval: 6000 * 10
 
-EchoNestException = (msg) ->
-  @name = "EchoNestException"
-  Error.call this, msg
-  Error.captureStackTrace this, arguments.callee
-
-rdio = new RdioClient(cred.RDIO_CONSUMER_KEY, cred.RDIO_CONSUMER_SECRET)
+rdio = new RdioClient cred.RDIO_CONSUMER_KEY, cred.RDIO_CONSUMER_SECRET
+echoNestClient = new EchoNestClient cred.ECHONEST_API_KEY
 
 app.get '/login', rdio.loginHandler
 app.get '/callback', rdio.callbackHandler
@@ -57,12 +52,7 @@ app.get '/', (req, res) ->
     res.send '<a href="/login">Login to rdio to continue.</a>'
     return
 
-  # Get playlist from echonest
-  # http://developer.echonest.com/api/v4/playlist/static?api_key=N6E4NIOVYMTHNDM8J&style=80s&style=powerpop&min_tempo=150&max_tempo=180&type=artist-description&results=5&bucket=id:rdio-us-streaming&limit=true
-  ECHONEST_API_HOST = 'http://developer.echonest.com/api/v4'
-
-  queryParams =
-    api_key: cred.ECHONEST_API_KEY
+  params =
     style: "80s"
     min_tempo: 150
     max_tempo: 180
@@ -71,16 +61,16 @@ app.get '/', (req, res) ->
     bucket: "id:rdio-us-streaming"
     limit: true
 
-  uri = "#{ECHONEST_API_HOST}/playlist/static?" + querystring.stringify(queryParams)
-  request uri, (err, res, body) ->
+  echoNestClient.staticPlaylist params, (err, json) ->
     throw new EchoNestException err if err?
-    json = JSON.parse body
 
     playlistSongs = (s.foreign_ids[0].foreign_id.split(':')[2] for s in json.response.songs)
 
     rdio.authenticate req.session
     rdio.createPlaylist "80s High Tempo Mix", "A runnr generated playlist", playlistSongs, (playlist) ->
       console.log "Created playlist #{playlist.name}!"
+
+  res.send ""
 
 
 app.listen 8000
