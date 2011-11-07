@@ -25,8 +25,8 @@ request = require 'request'
 querystring = require 'querystring'
 MemoryStore = require('express').session.MemoryStore
 
-Rdio = require './lib/rdio'
 cred = require './credentials'
+RdioClient = require './rdioClient'
 
 app = express.createServer()
 app.configure 'development', () ->
@@ -41,22 +41,19 @@ app.configure 'development', () ->
     store: new MemoryStore
       reapInterval: 6000 * 10
 
-
-RdioException = (msg) ->
-  @name = "RdioException"
-  Error.call this, msg
-  Error.captureStackTrace this, arguments.callee
-
 EchoNestException = (msg) ->
   @name = "EchoNestException"
   Error.call this, msg
   Error.captureStackTrace this, arguments.callee
 
+rdio = new RdioClient(cred.RDIO_CONSUMER_KEY, cred.RDIO_CONSUMER_SECRET)
+
+app.get '/login', rdio.loginHandler
+app.get '/callback', rdio.callbackHandler
+app.get '/logout', rdio.logoutHandler
 
 app.get '/', (req, res) ->
-  accessToken = req.session.accessToken
-  accessTokenSecret = req.session.accessTokenSecret
-  if not accessToken? or not accessTokenSecret?
+  if not rdio.loggedIn()
     res.send '<a href="/login">Login to rdio to continue.</a>'
     return
 
@@ -75,59 +72,15 @@ app.get '/', (req, res) ->
     limit: true
 
   uri = "#{ECHONEST_API_HOST}/playlist/static?" + querystring.stringify(queryParams)
-  console.log uri
   request uri, (err, res, body) ->
-    #throw new EchoNestException err if err?
+    throw new EchoNestException err if err?
     json = JSON.parse body
-    console.log(json.response.songs)
 
     playlistSongs = (s.foreign_ids[0].foreign_id.split(':')[2] for s in json.response.songs)
-    console.log playlistSongs
 
-    rdio = new Rdio [cred.RDIO_CONSUMER_KEY, cred.RDIO_CONSUMER_SECRET],
-                    [accessToken, accessTokenSecret]
-    params =
-      name: "80s High Tempo Mix"
-      description: "A runnr generated playlist"
-      tracks: playlistSongs.join ', '
-
-    rdio.call 'createPlaylist', params, (err, data) ->
-      throw new RdioException err if err?
-
-      playlist = data.result
-      res.send "Created playlist #{playlist.name}!"
-
-app.get '/login', (req, res) ->
-  callbackURL = 'http://localhost:8000/callback'
-  rdio = new Rdio [cred.RDIO_CONSUMER_KEY, cred.RDIO_CONSUMER_SECRET]
-  rdio.beginAuthentication callbackURL, (err, authURL) ->
-      throw new RdioException err if err?
-      [req.session.requestToken, req.session.requestTokenSecret] = rdio.token
-      res.redirect authURL
-
-app.get '/callback', (req, res) ->
-  verifier = req.query.oauth_verifier
-  requestToken = req.session.requestToken
-  requestTokenSecret = req.session.requestTokenSecret
-  console.log "verifier = #{verifier}, requestToken = #{requestToken}, requestTokenSecret = #{requestTokenSecret}"
-  res.redirect '/logout' if not verifier? or not requestToken? or not requestTokenSecret?
-
-  rdio = new Rdio [cred.RDIO_CONSUMER_KEY, cred.RDIO_CONSUMER_SECRET],
-                  [requestToken, requestTokenSecret]
-  rdio.completeAuthentication verifier, (err) ->
-    throw new RdioException err if err?
-
-    [req.session.accessToken, req.session.accessTokenSecret] = rdio.token
-
-    delete req.session.requestToken
-    delete req.session.requestTokenSecret
-
-    res.redirect '/'
-
-app.get '/logout', (req, res) ->
-  delete req.session.accessToken
-  delete req.session.accessTokenSecret
-  res.redirect '/'
+    rdio.authenticate req.session
+    rdio.createPlaylist "80s High Tempo Mix", "A runnr generated playlist", playlistSongs, (playlist) ->
+      console.log "Created playlist #{playlist.name}!"
 
 
 app.listen 8000
